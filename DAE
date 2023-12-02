@@ -1,0 +1,675 @@
+// UNIFESP / DEQ / ENGENHARIA QUÍMICA
+// UNIDADE CURRICULAR: MODELAGEM E ANÁLISE DE SISTEMAS
+// Prof. José Plácido - 2S2023
+//
+clearglobal;, clear;, clc;
+global Vr Te T0 Tec Tc0 Tamb Ea Fe Fs xeA xeB xeC xeD Fc UA Up Ap 
+global Cpc CpA CpB CpC CpD CpwMw Rg nGrupo k0 DHr Cpj Mwj pt 
+global k MA MB MC MD Cet xje0 xje rho0j rho0 Mwe CASO Tf To Kt
+//
+// cálculo da massa molar média (g/mol)
+function mt=massaMolar(xj)
+    global Mwj
+    mt = sum(xj.*Mwj); // g/mol
+endfunction
+//
+// cálculo da densidade mássica da mistura (g/L)
+function rho=densidade(xj,Mw)
+    global Mwj rho0j Mwe
+    rho = Mw/sum((xj.*Mwj)./rho0j); // g/L
+endfunction
+//
+// cálculo da Capacidade calorífica molar da mistura com frações molares x (J/mol.K)
+function Cpt=CpMolar(xj)
+    global Cpj
+    Cpt = sum(xj.*Cpj); // (J/mol.K)
+endfunction
+//
+// I - Dados do modelo:
+nGrupo = 18; // número do grupo
+tr = 5; // tabela(:,1) de residência (min)
+Vr = 0.340 + (nGrupo/200); // (L)
+Rg = 8.314; // (J/mol.K)
+//
+// II - parâmetros da cinética das reações:
+Ea = 1.0e5; // (J/mol)
+k0 = 4.440e14; // (L/mol.min)
+DHr = -134000; // (J/mol)
+//
+// III - propriedades físicas:
+// de A-D representa respectivamente (DMAC, SOCl2, SO2, Vrilsmeier)
+pA = 937; pB = 1632; pC = 1365; pD = 1194.0614; // (g/L)
+rho0j = [pA; pB; pC; pD]; // vetor que armazena as desidades iniciais de A-D (g/L)
+CpA = 154.8; CpB = 108.8; CpC = 97.4; CpD = 155;// (J/mol.K)
+Cpj = [CpA; CpB; CpC; CpD]; // vetor de fornecimento para função interna de capacidade calorífera média (J/mol.L)
+MA = 87.122; MB = 118.97; MC = 64.07; MD = 142.022;// (g/mol)
+Mwj = [MA; MB; MC; MD]; // vetor de fornecimento para função interna de massa molar total (g/mol)
+CpwMw = 103; // (J/K)
+//
+// IVr - Dados da corrente de entrada:
+Te = 283.15 - (nGrupo/100); // (K)
+Fe = Vr/tr; // (L/min)
+Fs = Fe; // corrente de saída (L/min)
+//
+// Vr - Perda de calor - dados
+Tamb = 298.15; // (K)
+Up = 15*60; // (J/min.m2.K)
+Ap = 0.0038; // (m2)
+//
+// VrI - Dados da camisa de resfriamento:
+Tec = Te; // (K)
+Fc = 24; // (L/min)
+U = 83*60; // (J/min.m2.K) 
+A = 0.021; // (m2)
+UA = U*A; // (J/min.K)
+Cpc = 1.5; // (J/g.K)
+mc = 462; // (g)
+pc = 1100; // (g/L)
+////
+// VrII - Parâmetros iniciais da função (t=0):
+Tc0 = Te;, x0j = [1.0;0.0;0.0;0.0];  // condições iniciais (TESTE)
+Mw0 = massaMolar(x0j); // função que retorna a massa molar inicial (g/mol)
+rho0 = densidade(x0j,Mw0);  // função que retorna a densidade total inicial (g/L)
+Ctot0 = rho0/Mw0; // concentração molar total inicial (mol/L)
+C0j = x0j*Ctot0; // concentração molar inicial individual (A-D)
+cp0 = CpMolar(x0j); // função que retorna a capacidade calorífera inicial (J/mol.L)
+n0j = Vr*C0j; // vetor de composição molar individual inicial (mol)
+nt0 = sum(n0j); // composição molar total inicial (mol)
+//
+// VrIII - Dados da corrente de entrada (xeA/xeB = 3):
+xeB = 1/(3+1);, xeA = 1 - xeB;, xeC = 0;, xeD = 0; // frações molares de entrada (A-D)
+xje = [xeA; xeB; xeC; xeD]; // vetor de passagem das frações molares de entrada para as funções internas (molj/mol_total)
+Mwe = massaMolar(xje); // função que retorna a massa molar de entrada (g/mol)
+rhoe = densidade(xje,Mwe);  // função que retorna a densidade total de entrada (g/L)
+Cet = rhoe/Mwe; // concentração molar total de entrada (mol/L)
+Cej = xje*Cet; // concentração molar de entrada individual (A-D)
+Cpet = CpMolar(xje); // função que retorna a capacidade calorífera de entrada (J/mol.L)
+CeA = Cej(1);, CeB = Cej(2);, CeC = Cej(3);, CeD = Cej(4); // alocação das concentrações molares de entrada (A-D)
+//
+//DADOS DO PERFIL DE TEMPERATURA (CASO 3)
+Tf = 400 - nGrupo;                                                // TEMPERATURA FINAL DO PERFIL
+To = 291.15 + nGrupo;                                            // TEMPERATURA INICIAL DO PERFIL
+Tf_temp = 80;                                                         // TEMPO PARA ATINGIR 99.9%
+Kt = (-1/Tf_temp)*log((0.001*Tf)/(Tf - To));                         // Kt
+Kt = round(1e5*Kt)/1e5;                                         // ARREDONDAMENTO
+
+
+function [r,ires] = exemplo_Daes(t,y,yd)                            //INSERIR O SISTEMA DE EADs
+    //DEFINICAO DAS VrARIAVrEIS GLOBAIS
+    global Vr Te T0 Tec Tc0 Tamb Ea Fe Fs xeA xeB xeC xeD Fc UA Up Ap 
+    global Cpc CpA CpB CpC CpD CpwMw Rg nGrupo k0 DHr Cpj Mwj pt 
+    global k MA MB MC MD Cet xje0 xje rho0j rho0 rhoe Mwe CASO Tf To Kt
+    ires = 0;
+    // Insira abaixo o sistema de equações algébrico-diferenciais na forma de resíduos:
+    aNA = y(1); dNA = yd(1); aNB = y(2); dNB = yd(2); aNC = y(3); dNC = yd(3); aND = y(4); dND = yd(4); // Número de Mols de A-D no Reator
+    aT = y(5); dT = yd(5); aTc = y(6); dTc = yd(6); aNtot = y(7); dNtot = yd(7); aRr = y(8); dRr = yd(8); // Temperatura do Reator e da Camisa de resfriamento, Número e Mols Totais no Reator e Taxa de Reação
+    aXA = y(9); dXA = yd(9); aXB = y(10); dXB = yd(10); aXC = y(11); dXC = yd(11); aXD = y(12); dXD = yd(12); // Fração Molar de A-D no Reator
+    aCp = y(13); dCp = yd(13); aMr = y(14); dMr = yd(14); aMB = y(15); dMB = yd(15); aTB = y(16); dTB = yd(16); // Cp médio e Massa Total no Reator, Massa Total e Temperatura no Tanque B
+    aNBA = y(17); dNBA = yd(17); aNBB = y(18); dNBB = yd(18); aNBC = y(19); dNBC = yd(19); aNBD = y(20); dNBD = yd(20); // Número de Mols de A-D no Tanque B
+    aVrB = y(21); dVrB = yd(21); aRhoB = y(22); dRhoB = yd(22); // Vrolume e Rho médio no Tanque B
+    //
+    CA = aNA/Vr; CB = aNB/Vr; CC = aNC/Vr; CD = aND/Vr; // Concentração molar de saída A-D e entrada do Tanque B(mol/L)
+    CTot = CA + CB + CC + CD // Concentração Molar total
+    aNtot = aNBA + aNBB + aNBC + aNBD // Fração Molar Total
+    xBA = aNBA/(aNtot); xBB = aNBB/(aNtot); xBC = aNBC/(aNtot); xBD = aNBD/(aNtot); //Fração Molar de A-D no Tanque B
+    CpmB = xBA*Cpj(1) + xBB*Cpj(2) + xBC*Cpj(3) + xBD*Cpj(4); // Cp médio no Tanque B
+    //
+    r(1) = -dNA+Fe*CeA-Fs*CA+Vr*aRr*(-1);                                                           //(a) BALANÇO MOLAR DE DMAC
+    r(2) = -dNB+Fe*CeB-Fs*CB+Vr*aRr*(-1);                                                           //(b) BALANÇO MOLAR DE SOCl2
+    r(3) = -dNC+Fe*CeC-Fs*CC+Vr*aRr*(1);                                                            //(c) BALANÇO MOLAR DE SO2
+    r(4) = -dND+Fe*CeD-Fs*CD+Vr*aRr*(1);                                                            //(d) BALANÇO MOLAR DE VrILSMEIER
+    r(5) = -dT+(Fe*Cet*Cpet*(Te-aT)+Vr*aRr*(-DHr)-U*A*(aT-aTc)-Up*Ap*(aT-Tamb))/(aNtot*aCp+CpwMw);  //(e) BALANÇO DE ENERGIA NO REATOR
+    select CASO
+    case "0"
+        r(6) = -dTc+(Fc*pc*Cpc*(Tec-aTc)+U*A*(aT-aTc))/(mc*Cpc);                                  //(f) BALANÇO DE ENERGIA NA CAMISA
+    case "1"
+        r(6) = -dTc+(Fc*pc*Cpc*(Tec-aTc)+U*A*(aT-aTc))/(mc*Cpc);                                  //(f) BALANÇO DE ENERGIA NA CAMISA
+    case "2"
+        r(6) = -dT;                                                                                    //(f2)
+    case "2alt"
+        r(6) = -aT+400-nGrupo;                                                                         // TESTE
+    case "3"
+        r(6) = -dT+Kt*(Tf-To)*exp(-Kt*t);                                                             //(f3)
+    case "3alt"
+        r(6) = -aT+Tf-(Tf-To)*exp(-Kt*t);                                                             // TESTE [(p) em vez de (f3)]
+    end
+    r(7) = -aNtot + aNA + aNB + aNC + aND;                                                                    //(g) EQUAÇÃO PARA DEFINIR O NÚMERO DE MOLS NO TOTAL NO REATOR
+    r(8) = -aRr + k0*exp(-Ea/(Rg*aT))*CA*CB;                                                         //(h) TAXA DE REAÇÃO
+    r(9) = -aNA + aNtot*aXA;                                                                            //(h-1) FRAÇÃO MOLAR DE DMAC NO REATOR
+    r(10) = -aNB + aNtot*aXB;                                                                           //(h-2) FRAÇÃO MOLAR DE SOCl2 NO REATOR
+    r(11) = -aNC + aNtot*aXC;                                                                           //(h-3) FRAÇÃO MOLAR DE SO2 NO REATOR
+    r(12) = -aND + aNtot*aXD;                                                                           //(h-4) FRAÇÃO MOLAR DE VrILSMEIER NO REATOR
+    r(13) = -aCp + (aXA*Cpj(1)+aXB*Cpj(2) + aXC*Cpj(3)+aXD*Cpj(4));                                    //(i) CAPACIDADE CALORÍFICA MÉDIA NO REATOR
+    r(14) = -aMr + (aNA*Mwj(1)+aNB*Mwj(2) + aNC*Mwj(3)+aND*Mwj(4));                                         //(j) EQUACIONAMENTO DA MASSA NA REATOR
+    r(15) = -dMB + (aMr/Vr)*Fs;                                                                          //(k) BALANÇO DE MASSA NO TANQUE B
+    r(16) = -dTB + (Fs*(CTot)*aCp*(aT-aTB))/((aNtot)*CpmB);                       //(l) BALANÇO DE ENERGIA NO TANQUE B 
+    r(17) = -dNBA + Fs*CA;                                                                             //(m-1) BALANÇO MOLAR DO DMAC NO TANQUE B
+    r(18) = -dNBB + Fs*CB;                                                                             //(m-2) BALANÇO MOLAR DO SOCl2 NO TANQUE B
+    r(19) = -dNBC + Fs*CC;                                                                             //(m-3) BALANÇO MOLAR DO SO2 NO TANQUE B
+    r(20) = -dNBD + Fs*CD;                                                                             //(m-4) BALANÇO MOLAR DO VrILSMEIER NO TANQUE B
+    r(21) = -aMB + aRhoB*aVrB;                                                                          //(m) VrOLUME DO REATOR NO TANQUE B
+    r(22) = -aRhoB + (xBA*Mwj(1) + xBB*Mwj(2) + xBC*Mwj(3) + xBD*Mwj(4))/(xBA*Mwj(1)/rho0j(1) + xBB*Mwj(2)/rho0j(2) + xBC*Mwj(3)/rho0j(3) + xBD*Mwj(4)/rho0j(4)); //(n) EQUAÇÃO DO FLUIDO NO TANQUE B
+endfunction
+//
+// ***************************************************************************************************************************************************************************************************************
+
+// selecione os casos aqui (condições da corrente de entrada, condições iniciais, t0, tf etc.)
+CASO = "0";  // VrALORES POSSÍVrEIS: "0", "1", "2", "2alt", "3", "3alt"
+select CASO
+case "0" then
+    //CONDICOES INICIAIS PARA O CASO 0
+    t0=0;                                                               //TEMPO INICIAL
+    tf=50;                                                              //TEMPO FINAL
+    Fs=Fe;                                                              //CORRENTE DE SAIDA É IGUAL A DE ENtrADA
+    Tc0=Tec;                                                            //TEMPERATURA DA CAMISA
+    x0j=[1,0,0,0];                                                       //FRAÇÕES INICIAIS DO REATOR
+    //CRIAÇÃO DO VrETOR DE CONDIÇÕES INICIAIS
+    Cinicial = rho0j(1)/Mwj(1);                                         //CONCENtrAÇÃO INICIAL
+    Ninicial = Cinicial*Vr;                                              //NUMERO TOTAL DE MOLS INICIAL NO REATOR
+    nA0=Ninicial;                                                       //NUMERO DE MOLS DE DMAC
+    nB0=0;                                                              //NUMERO DE MOLS DE SOCl2
+    nC0=0;                                                              //NUMERO DE MOLS DE SO2
+    nD0=0;                                                              //NUMERO DE MOLS DE VrILSMEIER
+    T0=329.95458-0.0000182*nGrupo^3+0.0021923*nGrupo^2-0.18324*nGrupo;  //TEMPERATURA INICIAL DO REATOR
+    T0 = round(T0*1e3)/1e3 + 0.001;                                     //ARREDONDAMENTO
+    n0=nA0+nB0+nC0+nD0;                                                 //NUMERO TOTAL DE MOLS INICIALMENTE
+    Rr0=0;                                                              //UMA VrEZ QUE NÃO HÁ SOCl2, A TAXA DE REAÇÃO É ZERO
+    xA0=nA0/n0;                                                         //FRAÇÃO DE DMAC INICIALMENTE NO REATOR
+    xB0=nB0/n0;                                                         //FRAÇÃO DE SOCl2 INICIALMENTE NO REATOR
+    xC0=nC0/n0;                                                         //FRAÇÃO DE SO2 INICIALMENTE NO REATOR
+    xD0=nD0/n0;                                                         //FRAÇÃO DE VrILSMEIER INICIALMENTE NO REATOR
+    Cp0=xA0*Cpj(1)+xB0*Cpj(2)+xC0*Cpj(3)+xD0*Cpj(4);                    //CAPACIDADE CALORÍFICA MÉDIA INICIALMENTE NO REATOR
+    m0=Vr*(xA0*rho0j(1)+xB0*rho0j(2)+xC0*rho0j(3)+xD0*rho0j(4));     //MASSA INICIALMENTE NO REATOR
+    mB0=1;                                                              //MASSA INICIAL NO TANQUE B
+    TB0=T0;                                                             //TEMPERATURA INICIAL NO TANQUE B
+    nBA0=mB0/Mwj(1);                                                     //NUMERO DE MOLS DE DMAC NO TANQUE B
+    nBB0=0;                                                             //NUMERO DE MOLS DE SOCl2 NO TANQUE B INICIALMENTE
+    nBC0=0;                                                             //NUMERO DE MOLS DE SO2 NO TANQUE B INICIALMENTE
+    nBD0=0;                                                             //NUMERO DE MOLS DE VrILSMEIER NO TANQUE B INICIALMENTE
+    VrB0=mB0/rho0j(1);                                                  //VrOLUME INICIAL NO TANQUE B INICIALMENTE
+    rhoB0=mB0/VrB0;                                                      //MASSA ESPECÍFICA MÉDIA INICIAL NO TANQUE B
+    y0=[nA0;nB0;nC0;nD0;T0;Tc0;n0;Rr0;xA0;xB0;xC0;xD0;Cp0;m0;mB0;TB0;nBA0;nBB0;nBC0;nBD0;VrB0;rhoB0]; //VrARIAVrEIS ALGÉBRICAS
+    yd0=zeros(22,1); //DERIVrADAS
+    
+case "1" then
+    //CONDICOES INICIAIS PARA O CASO 1
+    t0=0;                                                               //TEMPO INICIAL
+    tf=600;                                                             //TEMPO FINAL
+    tr=25;                                                              //TEMPO DE RESIDENCIA NO REATOR
+    Vr=0.340;                                                            //VrOLUME DO REATOR
+    Fe=Vr/tr;                                                            //VrAZÃO DE ENtrADA
+    Fs=Fe;                                                              //CORRENTE DE SAIDA É IGUAL A DE ENtrADA
+    Te=321+nGrupo;                                                      //TEMPERATURA NA CORRENTE DE ENtrADA DO REATOR
+    Tc0=283.15;                                                         //TEMPERATURA DA CAMISA
+    Tec=283.15;
+    x0j=[1,0,0,0];                                                       //FRAÇÕES INICIAIS DO REATOR
+    //CRIAÇÃO DO VrETOR DE CONDIÇÕES INICIAIS
+    Cinicial = rho0j(1)/Mwj(1);                                         //CONCENtrAÇÃO INICIAL
+    Ninicial = Cinicial*Vr;                                              //NUMERO TOTAL DE MOLS INICIAL NO REATOR
+    nA0=Ninicial;                                                       //NUMERO DE MOLS DE DMAC
+    nB0=0;                                                              //NUMERO DE MOLS DE SOCl2
+    nC0=0;                                                              //NUMERO DE MOLS DE SO2
+    nD0=0;                                                              //NUMERO DE MOLS DE VrILSMEIER
+    T0=400-nGrupo;                                                      //TEMPERATURA INICIAL DO REATOR
+    n0=nA0+nB0+nC0+nD0;                                                 //NUMERO TOTAL DE MOLS INICIALMENTE
+    Rr0=0;                                                              //UMA VrEZ QUE NÃO HÁ SOCl2, A TAXA DE REAÇÃO É ZERO
+    xA0=nA0/n0;                                                         //FRAÇÃO DE DMAC INICIALMENTE NO REATOR
+    xB0=nB0/n0;                                                         //FRAÇÃO DE SOCl2 INICIALMENTE NO REATOR
+    xC0=nC0/n0;                                                         //FRAÇÃO DE SO2 INICIALMENTE NO REATOR
+    xD0=nD0/n0;                                                         //FRAÇÃO DE VrILSMEIER INICIALMENTE NO REATOR
+    Cp0=xA0*Cpj(1)+xB0*Cpj(2)+xC0*Cpj(3)+xD0*Cpj(4);                    //CAPACIDADE CALORÍFICA MÉDIA INICIALMENTE NO REATOR
+    m0=Vr*(xA0*rho0j(1)+xB0*rho0j(2)+xC0*rho0j(3)+xD0*rho0j(4));     //MASSA INICIALMENTE NO REATOR
+    mB0=1;                                                              //MASSA INICIAL NO TANQUE B
+    TB0=T0;                                                             //TEMPERATURA INICIAL NO TANQUE B
+    nBA0=mB0/Mwj(1);                                                     //NUMERO DE MOLS DE DMAC NO TANQUE B
+    nBB0=0;                                                             //NUMERO DE MOLS DE SOCl2 NO TANQUE B INICIALMENTE
+    nBC0=0;                                                             //NUMERO DE MOLS DE SO2 NO TANQUE B INICIALMENTE
+    nBD0=0;                                                             //NUMERO DE MOLS DE VrILSMEIER NO TANQUE B INICIALMENTE
+    VrB0=mB0/rho0j(1);                                                  //VrOLUME INICIAL NO TANQUE B INICIALMENTE
+    rhoB0=mB0/VrB0;                                                      //MASSA ESPECÍFICA MÉDIA INICIAL NO TANQUE B
+    //VrETOR INICIAL
+    y0=[nA0;nB0;nC0;nD0;T0;Tc0;n0;Rr0;xA0;xB0;xC0;xD0;Cp0;m0;mB0;TB0;nBA0;nBB0;nBC0;nBD0;VrB0;rhoB0]; //VrARIAVrEIS ALGÉBRICAS
+    yd0=zeros(22,1); //DERIVrADAS
+case "2" then
+    //CONDICOES INICIAIS PARA O CASO 2
+    t0=0;                                                               //TEMPO INICIAL
+    tf=120;                                                             //TEMPO FINAL
+    tr=25;                                                              //TEMPO DE RESIDENCIA NO REATOR
+    Vr=0.340;                                                            //VrOLUME DO REATOR
+    Fe=Vr/tr;                                                            //VrAZÃO DE ENtrADA
+    Fs=Fe;                                                              //CORRENTE DE SAIDA É IGUAL A DE ENtrADA
+    Te=321+nGrupo;                                                      //TEMPERATURA NA CORRENTE DE ENtrADA DO REATOR
+    Tec=283.15;
+    x0j=[1,0,0,0];                                                       //FRAÇÕES INICIAIS DO REATOR
+    //CRIAÇÃO DO VrETOR DE CONDIÇÕES INICIAIS
+    Cinicial = rho0j(1)/Mwj(1);                                         //CONCENtrAÇÃO INICIAL
+    Ninicial = Cinicial*Vr;                                              //NUMERO TOTAL DE MOLS INICIAL NO REATOR
+    nA0=Ninicial;                                                       //NUMERO DE MOLS DE DMAC
+    nB0=0;                                                              //NUMERO DE MOLS DE SOCl2
+    nC0=0;                                                              //NUMERO DE MOLS DE SO2
+    nD0=0;                                                              //NUMERO DE MOLS DE VrILSMEIER
+    T0=400-nGrupo;                                                      //TEMPERATURA INICIAL DO REATOR
+    n0=nA0+nB0+nC0+nD0;                                                 //NUMERO TOTAL DE MOLS INICIALMENTE
+    Rr0=0;                                                              //UMA VrEZ QUE NÃO HÁ SOCl2, A TAXA DE REAÇÃO É ZERO
+    xA0=nA0/n0;                                                         //FRAÇÃO DE DMAC INICIALMENTE NO REATOR
+    xB0=nB0/n0;                                                         //FRAÇÃO DE SOCl2 INICIALMENTE NO REATOR
+    xC0=nC0/n0;                                                         //FRAÇÃO DE SO2 INICIALMENTE NO REATOR
+    xD0=nD0/n0;                                                         //FRAÇÃO DE VrILSMEIER INICIALMENTE NO REATOR
+    Cp0=xA0*Cpj(1)+xB0*Cpj(2)+xC0*Cpj(3)+xD0*Cpj(4);                    //CAPACIDADE CALORÍFICA MÉDIA INICIALMENTE NO REATOR
+    m0=Vr*(xA0*rho0j(1)+xB0*rho0j(2)+xC0*rho0j(3)+xD0*rho0j(4));     //MASSA INICIALMENTE NO REATOR
+    mB0=1;                                                              //MASSA INICIAL NO TANQUE B
+    TB0=T0;                                                             //TEMPERATURA INICIAL NO TANQUE B
+    nBA0=mB0/Mwj(1);                                                     //NUMERO DE MOLS DE DMAC NO TANQUE B
+    nBB0=0;                                                             //NUMERO DE MOLS DE SOCl2 NO TANQUE B INICIALMENTE
+    nBC0=0;                                                             //NUMERO DE MOLS DE SO2 NO TANQUE B INICIALMENTE
+    nBD0=0;                                                             //NUMERO DE MOLS DE VrILSMEIER NO TANQUE B INICIALMENTE
+    VrB0=mB0/rho0j(1);                                                  //VrOLUME INICIAL NO TANQUE B INICIALMENTE
+    rhoB0=mB0/VrB0;                                                      //MASSA ESPECÍFICA MÉDIA INICIAL NO TANQUE B
+    //determinar Tc0
+    //CALCULOS ENVrOLVrENDO A CORRENTE DE ENtrADA
+    Mwe = sum(xje.*Mwj);                                                                  //MASSA MOLECULAR MÉDIA DA CORRENTE DE ENtrADA DO REATOR
+    rhoe = Mwe/(sum(xje.*Mwj./rho0j));                                             //MASSA ESPÉCIFICA MÉDIA DA CORRENTE DE ENtrADA DO REATOR
+    CeA = xje(1)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE DMAC NA CORRENTE DE ENtrADA DO REATOR
+    CeB = xje(2)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE SOCl2 NA CORRENTE DE ENtrADA DO REATOR
+    CeC = xje(3)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE SO2 NA CORRENTE DE ENtrADA DO REATOR
+    CeD = xje(4)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE VrILSMEIER NA CORRENTE DE ENtrADA DO REATOR
+    Cet = CeA+CeB+CeC+CeD;                                                                          //CONCENtrAÇÃO TOTAL NA CORRENTE DE ENtrADA DO REATOR
+    Cpet = sum(xje.*CpA);
+    //CALCULOS ENVrOLVrENDO AS CONCENtrAÇÕES NO REATOR (IGUAIS A DA CORRENTE DE SAIDA E QUE ENtrA NO TANQUE B)
+    CA = nA0/Vr; //CONCENtrAÇÃO DE DMAC NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CB = nB0/Vr; //CONCENtrAÇÃO DE SOCl2 NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CC = nC0/Vr; //CONCENtrAÇÃO DE SO2 NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CD = nD0/Vr; //CONCENtrAÇÃO DE VrILSMEIER NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    Rr = k0*exp(-Ea/(Rg*T0))*(nA0/Vr)*(nB0/Vr);
+    Tc0 = (Up*Ap*(T0-Tamb)-Fe*Cet*Cpet*(Te-T0)-Vr*Rr*(-DHr)+U*A*T0)/(U*A);
+    //VrETOR INICIAL
+    y0=[nA0;nB0;nC0;nD0;T0;Tc0;n0;Rr0;xA0;xB0;xC0;xD0;Cp0;m0;mB0;TB0;nBA0;nBB0;nBC0;nBD0;VrB0;rhoB0]; //VrARIAVrEIS ALGÉBRICAS
+    yd0=zeros(22,1); //DERIVrADAS
+case "2alt" then
+    //CONDICOES INICIAIS PARA O CASO 2alt
+    t0=0;                                                               //TEMPO INICIAL
+    tf=120;                                                             //TEMPO FINAL
+    tr=25;                                                              //TEMPO DE RESIDENCIA NO REATOR
+    Vr=0.340;                                                            //VrOLUME DO REATOR
+    Fe=Vr/tr;                                                            //VrAZÃO DE ENtrADA
+    Fs=Fe;                                                              //CORRENTE DE SAIDA É IGUAL A DE ENtrADA
+    Te=321+nGrupo;                                                      //TEMPERATURA NA CORRENTE DE ENtrADA DO REATOR
+    Tec=283.15;
+    x0j=[1,0,0,0];                                                       //FRAÇÕES INICIAIS DO REATOR
+    //CRIAÇÃO DO VrETOR DE CONDIÇÕES INICIAIS
+    Cinicial = rho0j(1)/Mwj(1);                                         //CONCENtrAÇÃO INICIAL
+    Ninicial = Cinicial*Vr;                                              //NUMERO TOTAL DE MOLS INICIAL NO REATOR
+    nA0=Ninicial;                                                       //NUMERO DE MOLS DE DMAC
+    nB0=0;                                                              //NUMERO DE MOLS DE SOCl2
+    nC0=0;                                                              //NUMERO DE MOLS DE SO2
+    nD0=0;                                                              //NUMERO DE MOLS DE VrILSMEIER
+    T0=400-nGrupo;                                                      //TEMPERATURA INICIAL DO REATOR
+    n0=nA0+nB0+nC0+nD0;                                                 //NUMERO TOTAL DE MOLS INICIALMENTE
+    Rr0=0;                                                              //UMA VrEZ QUE NÃO HÁ SOCl2, A TAXA DE REAÇÃO É ZERO
+    xA0=nA0/n0;                                                         //FRAÇÃO DE DMAC INICIALMENTE NO REATOR
+    xB0=nB0/n0;                                                         //FRAÇÃO DE SOCl2 INICIALMENTE NO REATOR
+    xC0=nC0/n0;                                                         //FRAÇÃO DE SO2 INICIALMENTE NO REATOR
+    xD0=nD0/n0;                                                         //FRAÇÃO DE VrILSMEIER INICIALMENTE NO REATOR
+    Cp0=xA0*Cpj(1)+xB0*Cpj(2)+xC0*Cpj(3)+xD0*Cpj(4);                    //CAPACIDADE CALORÍFICA MÉDIA INICIALMENTE NO REATOR
+    m0=Vr*(xA0*rho0j(1)+xB0*rho0j(2)+xC0*rho0j(3)+xD0*rho0j(4));     //MASSA INICIALMENTE NO REATOR
+    mB0=1;                                                              //MASSA INICIAL NO TANQUE B
+    TB0=T0;                                                             //TEMPERATURA INICIAL NO TANQUE B
+    nBA0=mB0/Mwj(1);                                                     //NUMERO DE MOLS DE DMAC NO TANQUE B
+    nBB0=0;                                                             //NUMERO DE MOLS DE SOCl2 NO TANQUE B INICIALMENTE
+    nBC0=0;                                                             //NUMERO DE MOLS DE SO2 NO TANQUE B INICIALMENTE
+    nBD0=0;                                                             //NUMERO DE MOLS DE VrILSMEIER NO TANQUE B INICIALMENTE
+    VrB0=mB0/rho0j(1);                                                  //VrOLUME INICIAL NO TANQUE B INICIALMENTE
+    rhoB0=mB0/VrB0;                                                      //MASSA ESPECÍFICA MÉDIA INICIAL NO TANQUE B
+    //determinar Tc0
+    //CALCULOS ENVrOLVrENDO A CORRENTE DE ENtrADA
+    Mwe = sum(xje.*Mwj);                                                                  //MASSA MOLECULAR MÉDIA DA CORRENTE DE ENtrADA DO REATOR
+    rhoe = Mwe/(sum(xje.*Mwj./rho0j));                                             //MASSA ESPÉCIFICA MÉDIA DA CORRENTE DE ENtrADA DO REATOR
+    CeA = xje(1)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE DMAC NA CORRENTE DE ENtrADA DO REATOR
+    CeB = xje(2)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE SOCl2 NA CORRENTE DE ENtrADA DO REATOR
+    CeC = xje(3)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE SO2 NA CORRENTE DE ENtrADA DO REATOR
+    CeD = xje(4)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE VrILSMEIER NA CORRENTE DE ENtrADA DO REATOR
+    Cet = CeA+CeB+CeC+CeD;                                                                          //CONCENtrAÇÃO TOTAL NA CORRENTE DE ENtrADA DO REATOR
+    Cpet = sum(xje.*CpA);
+    //CALCULOS ENVrOLVrENDO AS CONCENtrAÇÕES NO REATOR (IGUAIS A DA CORRENTE DE SAIDA E QUE ENtrA NO TANQUE B)
+    CA = nA0/Vr; //CONCENtrAÇÃO DE DMAC NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CB = nB0/Vr; //CONCENtrAÇÃO DE SOCl2 NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CC = nC0/Vr; //CONCENtrAÇÃO DE SO2 NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CD = nD0/Vr; //CONCENtrAÇÃO DE VrILSMEIER NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    Rr = k0*exp(-Ea/(Rg*T0))*(nA0/Vr)*(nB0/Vr);
+    Tc0 = (Up*Ap*(T0-Tamb)-Fe*Cet*Cpet*(Te-T0)-Vr*Rr*(-DHr)+U*A*T0)/(U*A);
+    //VrETOR INICIAL
+    y0=[nA0;nB0;nC0;nD0;T0;Tc0;n0;Rr0;xA0;xB0;xC0;xD0;Cp0;m0;mB0;TB0;nBA0;nBB0;nBC0;nBD0;VrB0;rhoB0]; //VrARIAVrEIS ALGÉBRICAS
+    yd0=zeros(22,1); //DERIVrADAS
+case "3" then
+    //CONDICOES INICIAIS PARA O CASO 3
+    t0=0;                                                               //TEMPO INICIAL
+    tf=120;                                                             //TEMPO FINAL
+    tr=25;                                                              //TEMPO DE RESIDENCIA NO REATOR
+    Vr=0.340;                                                            //VrOLUME DO REATOR
+    Fe=Vr/tr;                                                            //VrAZÃO DE ENtrADA
+    Fs=Fe;                                                              //CORRENTE DE SAIDA É IGUAL A DE ENtrADA
+    Te=321+nGrupo;                                                      //TEMPERATURA NA CORRENTE DE ENtrADA DO REATOR
+    Tec=283.15;
+    x0j=[1,0,0,0];                                                       //FRAÇÕES INICIAIS DO REATOR
+    //CRIAÇÃO DO VrETOR DE CONDIÇÕES INICIAIS
+    Cinicial = rho0j(1)/Mwj(1);                                         //CONCENtrAÇÃO INICIAL
+    Ninicial = Cinicial*Vr;                                              //NUMERO TOTAL DE MOLS INICIAL NO REATOR
+    nA0=Ninicial;                                                       //NUMERO DE MOLS DE DMAC
+    nB0=0;                                                              //NUMERO DE MOLS DE SOCl2
+    nC0=0;                                                              //NUMERO DE MOLS DE SO2
+    nD0=0;                                                              //NUMERO DE MOLS DE VrILSMEIER
+    T0=To;                                                             //TEMPERATURA INICIAL DO REATOR
+    n0=nA0+nB0+nC0+nD0;                                                 //NUMERO TOTAL DE MOLS INICIALMENTE
+    Rr0=0;                                                              //UMA VrEZ QUE NÃO HÁ SOCl2, A TAXA DE REAÇÃO É ZERO
+    xA0=nA0/n0;                                                         //FRAÇÃO DE DMAC INICIALMENTE NO REATOR
+    xB0=nB0/n0;                                                         //FRAÇÃO DE SOCl2 INICIALMENTE NO REATOR
+    xC0=nC0/n0;                                                         //FRAÇÃO DE SO2 INICIALMENTE NO REATOR
+    xD0=nD0/n0;                                                         //FRAÇÃO DE VrILSMEIER INICIALMENTE NO REATOR
+    Cp0=xA0*Cpj(1)+xB0*Cpj(2)+xC0*Cpj(3)+xD0*Cpj(4);                    //CAPACIDADE CALORÍFICA MÉDIA INICIALMENTE NO REATOR
+    m0=Vr*(xA0*rho0j(1)+xB0*rho0j(2)+xC0*rho0j(3)+xD0*rho0j(4));     //MASSA INICIALMENTE NO REATOR
+    mB0=1;                                                              //MASSA INICIAL NO TANQUE B
+    TB0=T0;                                                             //TEMPERATURA INICIAL NO TANQUE B
+    nBA0=mB0/Mwj(1);                                                     //NUMERO DE MOLS DE DMAC NO TANQUE B
+    nBB0=0;                                                             //NUMERO DE MOLS DE SOCl2 NO TANQUE B INICIALMENTE
+    nBC0=0;                                                             //NUMERO DE MOLS DE SO2 NO TANQUE B INICIALMENTE
+    nBD0=0;                                                             //NUMERO DE MOLS DE VrILSMEIER NO TANQUE B INICIALMENTE
+    VrB0=mB0/rho0j(1);                                                  //VrOLUME INICIAL NO TANQUE B INICIALMENTE
+    rhoB0=mB0/VrB0;                                                      //MASSA ESPECÍFICA MÉDIA INICIAL NO TANQUE B
+    //determinar Tc0
+    //CALCULOS ENVrOLVrENDO A CORRENTE DE ENtrADA
+    Mwe = sum(xje.*Mwj);                                                                  //MASSA MOLECULAR MÉDIA DA CORRENTE DE ENtrADA DO REATOR
+    rhoe = Mwe/(sum(xje.*Mwj./rho0j));                                             //MASSA ESPÉCIFICA MÉDIA DA CORRENTE DE ENtrADA DO REATOR
+    CeA = xje(1)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE DMAC NA CORRENTE DE ENtrADA DO REATOR
+    CeB = xje(2)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE SOCl2 NA CORRENTE DE ENtrADA DO REATOR
+    CeC = xje(3)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE SO2 NA CORRENTE DE ENtrADA DO REATOR
+    CeD = xje(4)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE VrILSMEIER NA CORRENTE DE ENtrADA DO REATOR
+    Cet = CeA+CeB+CeC+CeD;                                                                          //CONCENtrAÇÃO TOTAL NA CORRENTE DE ENtrADA DO REATOR
+    Cpet = sum(xje.*CpA);
+    //CALCULOS ENVrOLVrENDO AS CONCENtrAÇÕES NO REATOR (IGUAIS A DA CORRENTE DE SAIDA E QUE ENtrA NO TANQUE B)
+    CA = nA0/Vr; //CONCENtrAÇÃO DE DMAC NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CB = nB0/Vr; //CONCENtrAÇÃO DE SOCl2 NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CC = nC0/Vr; //CONCENtrAÇÃO DE SO2 NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CD = nD0/Vr; //CONCENtrAÇÃO DE VrILSMEIER NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    Rr = k0*exp(-Ea/(Rg*T0))*(nA0/Vr)*(nB0/Vr);
+    Tc0 = ((Kt*(Tf-To))*((nA0+nB0+nC0+nD0)*Cp0+CpwMw)+Up*Ap*(T0-Tamb)-Fe*Cet*Cpet*(Te-T0)-Vr*Rr*(-DHr)+U*A*T0)/(U*A);
+    //VrETOR INICIAL
+    y0=[nA0;nB0;nC0;nD0;T0;Tc0;n0;Rr0;xA0;xB0;xC0;xD0;Cp0;m0;mB0;TB0;nBA0;nBB0;nBC0;nBD0;VrB0;rhoB0]; //VrARIAVrEIS ALGÉBRICAS
+    yd0=zeros(22,1); //DERIVrADAS
+case "3alt" then
+    //CONDICOES INICIAIS PARA O CASO 3
+    t0=0;                                                               //TEMPO INICIAL
+    tf=120;                                                             //TEMPO FINAL
+    tr=25;                                                              //TEMPO DE RESIDENCIA NO REATOR
+    Vr=0.340;                                                            //VrOLUME DO REATOR
+    Fe=Vr/tr;                                                            //VrAZÃO DE ENtrADA
+    Fs=Fe;                                                              //CORRENTE DE SAIDA É IGUAL A DE ENtrADA
+    Te=321+nGrupo;                                                      //TEMPERATURA NA CORRENTE DE ENtrADA DO REATOR
+    Tec=283.15;
+    x0j=[1,0,0,0];                                                       //FRAÇÕES INICIAIS DO REATOR
+    //CRIAÇÃO DO VrETOR DE CONDIÇÕES INICIAIS
+    Cinicial = rho0j(1)/Mwj(1);                                         //CONCENtrAÇÃO INICIAL
+    Ninicial = Cinicial*Vr;                                              //NUMERO TOTAL DE MOLS INICIAL NO REATOR
+    nA0=Ninicial;                                                       //NUMERO DE MOLS DE DMAC
+    nB0=0;                                                              //NUMERO DE MOLS DE SOCl2
+    nC0=0;                                                              //NUMERO DE MOLS DE SO2
+    nD0=0;                                                              //NUMERO DE MOLS DE VrILSMEIER
+    T0=To;                                                             //TEMPERATURA INICIAL DO REATOR
+    n0=nA0+nB0+nC0+nD0;                                                 //NUMERO TOTAL DE MOLS INICIALMENTE
+    Rr0=0;                                                              //UMA VrEZ QUE NÃO HÁ SOCl2, A TAXA DE REAÇÃO É ZERO
+    xA0=nA0/n0;                                                         //FRAÇÃO DE DMAC INICIALMENTE NO REATOR
+    xB0=nB0/n0;                                                         //FRAÇÃO DE SOCl2 INICIALMENTE NO REATOR
+    xC0=nC0/n0;                                                         //FRAÇÃO DE SO2 INICIALMENTE NO REATOR
+    xD0=nD0/n0;                                                         //FRAÇÃO DE VrILSMEIER INICIALMENTE NO REATOR
+    Cp0=xA0*Cpj(1)+xB0*Cpj(2)+xC0*Cpj(3)+xD0*Cpj(4);                    //CAPACIDADE CALORÍFICA MÉDIA INICIALMENTE NO REATOR
+    m0=Vr*(xA0*rho0j(1)+xB0*rho0j(2)+xC0*rho0j(3)+xD0*rho0j(4));     //MASSA INICIALMENTE NO REATOR
+    mB0=1;                                                              //MASSA INICIAL NO TANQUE B
+    TB0=T0;                                                             //TEMPERATURA INICIAL NO TANQUE B
+    nBA0=mB0/Mwj(1);                                                     //NUMERO DE MOLS DE DMAC NO TANQUE B
+    nBB0=0;                                                             //NUMERO DE MOLS DE SOCl2 NO TANQUE B INICIALMENTE
+    nBC0=0;                                                             //NUMERO DE MOLS DE SO2 NO TANQUE B INICIALMENTE
+    nBD0=0;                                                             //NUMERO DE MOLS DE VrILSMEIER NO TANQUE B INICIALMENTE
+    VrB0=mB0/rho0j(1);                                                  //VrOLUME INICIAL NO TANQUE B INICIALMENTE
+    rhoB0=mB0/VrB0;                                                      //MASSA ESPECÍFICA MÉDIA INICIAL NO TANQUE B
+    //determinar Tc0
+    //CALCULOS ENVrOLVrENDO A CORRENTE DE ENtrADA
+    Mwe = sum(xje.*Mwj);                                                                  //MASSA MOLECULAR MÉDIA DA CORRENTE DE ENtrADA DO REATOR
+    rhoe = Mwe/(sum(xje.*Mwj./rho0j));                                             //MASSA ESPÉCIFICA MÉDIA DA CORRENTE DE ENtrADA DO REATOR
+    CeA = xje(1)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE DMAC NA CORRENTE DE ENtrADA DO REATOR
+    CeB = xje(2)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE SOCl2 NA CORRENTE DE ENtrADA DO REATOR
+    CeC = xje(3)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE SO2 NA CORRENTE DE ENtrADA DO REATOR
+    CeD = xje(4)*rhoe/Mwe;                                                         //CONCENtrAÇÃO DE VrILSMEIER NA CORRENTE DE ENtrADA DO REATOR
+    Cet = CeA+CeB+CeC+CeD;                                                                          //CONCENtrAÇÃO TOTAL NA CORRENTE DE ENtrADA DO REATOR
+    Cpet = sum(xje.*CpA);
+    //CALCULOS ENVrOLVrENDO AS CONCENtrAÇÕES NO REATOR (IGUAIS A DA CORRENTE DE SAIDA E QUE ENtrA NO TANQUE B)
+    CA = nA0/Vr; //CONCENtrAÇÃO DE DMAC NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CB = nB0/Vr; //CONCENtrAÇÃO DE SOCl2 NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CC = nC0/Vr; //CONCENtrAÇÃO DE SO2 NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    CD = nD0/Vr; //CONCENtrAÇÃO DE VrILSMEIER NO REATOR, NA VrAZÃO DE SAÍDA DO REATOR E NA ENtrADA DO TANQUE B
+    Rr = k0*exp(-Ea/(Rg*T0))*(nA0/Vr)*(nB0/Vr);
+    Tc0 = ((Kt*(Tf-To))*((nA0+nB0+nC0+nD0)*Cp0+CpwMw)+Up*Ap*(T0-Tamb)-Fe*Cet*Cpet*(Te-T0)-Vr*Rr*(-DHr)+U*A*T0)/(U*A);
+    //VrETOR INICIAL
+    y0=[nA0;nB0;nC0;nD0;T0;Tc0;n0;Rr0;xA0;xB0;xC0;xD0;Cp0;m0;mB0;TB0;nBA0;nBB0;nBC0;nBD0;VrB0;rhoB0]; //VrARIAVrEIS ALGÉBRICAS
+    yd0=zeros(22,1); //DERIVrADAS
+end
+
+
+ny = length(y0);
+%DAEOPTIONS = list([], 1, [], [], [], 0, 0);
+%DAEOPTIONS(2)=1; // 1 para retornar a malha interna de tabela(:,1) utilizada pelo dae
+%DAEOPTIONS(7)=1; //1; // Utilize 1 se yd0 for apenas uma estimativa, ou 0 se yd0 for exato
+//
+// Chamada da função dae:
+//
+yy=dae([y0,yd0],t0,tf,exemplo_Daes);
+//
+// A 1a linha de yy contém o tabela(:,1) (cada coluna representa um tabela(:,1) diferente);
+// As linhas seguintes contêm as ny variáveis e as ny derivadas das variáveis;
+//
+// Repassar os resultados para a variável "tabela" (a 1a coluna contém o tabela(:,1), demais colunas são as variáveis):
+//
+ntempo = length(yy(1,:));
+tabela = zeros(ntempo+1,ny+1);
+tabela(1,:) = [t0,y0']; // y0 precisa ser um vetor coluna (condição inicial do problema)
+tabela(2:$,:) = yy(1:ny+1,:)';
+yd = zeros(ntempo+1,ny); // Derivadas das variáveis
+yd(1,:) = yd0';
+yd(2:$,:) = yy(ny+2:2*ny+1,:)';
+//
+//disp("Primeiros 3 pontos e último ponto da tabela de resultados:",[tabela(1:3,:);tabela($,:)])
+mprintf("\n- Tempo final, consumo de CPU: %s s\n", string(timer()))  // Finaliza e imprime a verificação do consumo de CPU
+mprintf("- Tempo gasto via comandos tic()/toc(): %s s\n",string(toc()))
+// Apresentação dos primeiros 3 pontos e último ponto da tabela de resultados:
+tabF = [tabela(1:3,:); tabela($,:)];
+// Apresentação dos primeiros 3 pontos e último ponto da tabela de resultados:
+mprintf("\n- Primeiros 3 pontos e último ponto da tabela de resultados:\n")
+mprintf("\n t0 t(n-2) t(n-1) t(n) \n")
+mprintf("%14.6e %14.6e %14.6e %14.6e \n",tabF')
+
+//CALCULOS PARA CONVrERSÃO
+Mwe = sum(xje.*Mwj);
+rhoe = Mwe/(sum(xje.*Mwj./rho0j));
+CeB = xje(2)*rhoe/Mwe;
+CB = (tabela($,3))/Vr;
+Cb2 = (tabela($,19))/(tabela($,22));
+Conv=100*(Fe*CeB-Fs*CB)/(Fe*CeB);
+ConvB=100*(CeB-Cb2)/CeB;
+mprintf("\n- Conversão final = %s %%.\n",string(Conv($)))
+mprintf("\n- Conversão final de SoCl2 no tanque B = %s %%.\n",string(ConvB($)))
+
+// ******************************************************************************************** GRÁFICOS **********************************************************************************************************
+
+
+formatar = %t;
+figId = get('figures_id'); // obtém os identificadores de todos os gráficos abertos
+if ~isempty(figId) then
+ close(figId) // elimina os gráficos existentes
+end
+subplot(231) // Janela 0
+plot2d(tabela(:,1),tabela(:,2)./Vr,[5]); // Figura 1, gráfico 1
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"1-Conc. de DMAC.";
+xTexto1 = "t (min)";
+yTexto1 = "DMAC, mol/L";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),tabela(:,2)./Vr,titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+subplot(232) // Janela 0
+plot2d(tabela(:,1),tabela(:,3)./Vr,[13]); // Figura 1, gráfico 2
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"2-Conc. de SOCl2.";
+xTexto1 = "t (min)";
+yTexto1 = "SOCl2, mol/L";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),tabela(:,3)./Vr,titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+subplot(233) // Janela 0
+plot2d(tabela(:,1),tabela(:,6),[5]); // Figura 1, gráfico 3
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"5-Temperatura do reator, T (K).";
+xTexto1 = "t (min)";
+yTexto1 = "T (K)";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),tabela(:,6),titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+subplot(234) // Janela 0
+plot2d(tabela(:,1),tabela(:,4)./Vr,[19]); // Figura 1, gráfico 4
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"3-Conc. de SO2.";
+xTexto1 = "t (min)";
+yTexto1 = "SO2, mol/L";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),tabela(:,4)./Vr,titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+subplot(235) // Janela 0
+plot2d(tabela(:,1),tabela(:,5)./Vr,[3]); // Figura 1, gráfico 5
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"4-Conc. de Vrilsmeier.";
+xTexto1 = "t (min)";
+yTexto1 = " Vrilsmeier, mol/L";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),tabela(:,5)./Vr,titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+subplot(236) // Janela 0
+plot2d(tabela(:,1),tabela(:,7),[2]); // Figura 1, gráfico 6
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"6-Temperatura da camisa, Tc (K).";
+xTexto1 = "t (min)";
+yTexto1 = " Tc (K)";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),tabela(:,7),titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+//
+scf(); //Janela 1
+subplot(221) // Janela 1
+plot2d(tabela(:,1),tabela(:,9),[19]); // Figura 2, gráfico 1
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"7-Taxa de reação em mol/(min.L).";
+xTexto1 = "t (min)";
+yTexto1 = "Rr, mol/(min.L)";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),tabela(:,9),titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+subplot(222) // Janela 1
+plot2d(tabela(:,1),U*A*(tabela(:,6)-tabela(:,7)),[3]); // Figura 2, gráfico 2
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"8-Transferência de calor, W.";
+xTexto1 = "t (min)";
+yTexto1 = "Qr, W";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),U*A*(tabela(:,6)-tabela(:,7)),titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+subplot(223) // Janela 1
+plot2d(tabela(:,1),tabela(:,15),[5]); // Figura 2, gráfico 3
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"9-Massa total no reator, g.";
+xTexto1 = "t (min)";
+yTexto1 = "massa, g";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),tabela(:,15),titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+subplot(224) // Janela 1
+plot2d(tabela(:,1),[tabela(:,10),tabela(:,11),tabela(:,13)],[5,4,3]); // Figura 2, gráfico 4
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"10-Frações molares.";
+xTexto1 = "t (min)";
+yTexto1 = "xA, xB, xD";
+legenda1 = ["x_DMAC","x_SOCl2","x_Vrilsmeier"];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),[tabela(:,10),tabela(:,11),tabela(:,13)],titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+legend(legenda1,1);
+xgrid(1,1,7);
+//
+scf(); //Janela 2
+subplot(221) // Janela 2
+plot2d(tabela(:,1),tabela(:,22),[5]); // Figura 3, gráfico 1
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"11-VrB (L).";
+xTexto1 = "t (min)";
+yTexto1 = "VrB";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),tabela(:,22),titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+subplot(222) // Janela 2
+plot2d(tabela(:,1),tabela(:,23),[5]); // Figura 3, gráfico 2
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"12-rhoB (L).";
+xTexto1 = "t (min)";
+yTexto1 = "rhoB";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),tabela(:,23),titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+subplot(223) // Janela 2
+plot2d(tabela(:,1),tabela(:,17),[5]); // Figura 3, gráfico 3
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"13-TB (K).";
+xTexto1 = "t (min)";
+yTexto1 = "TB (K)";
+legenda1 = [];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),tabela(:,17),titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+xgrid(1,1,7);
+subplot(224) // Janela 1
+plot2d(tabela(:,1),[tabela(:,18)./(tabela(:,18)+tabela(:,19)+tabela(:,20)+tabela(:,21)),tabela(:,19)./(tabela(:,18)+tabela(:,19)+tabela(:,20)+tabela(:,21)),tabela(:,21)./(tabela(:,18)+tabela(:,19)+tabela(:,20)+tabela(:,21))],[5,4,3]); // Figura 2, gráfico 4
+hdl1 = gcf(); // adquire um manipulador para o objeto gráfico
+titulo1 = "C"+CASO+"."+"14-Frações molares (B).";
+xTexto1 = "t (min)";
+yTexto1 = "xA, xB, xD";
+legenda1 = ["x_DMAC","x_SOCl2","x_Vrilsmeier"];
+if formatar then
+ hd1 = formataGraf(hdl1,tabela(:,1),[tabela(:,18)./(tabela(:,18)+tabela(:,19)+tabela(:,20)+tabela(:,21)),tabela(:,19)./(tabela(:,18)+tabela(:,19)+tabela(:,20)+tabela(:,21)),tabela(:,21)./(tabela(:,18)+tabela(:,19)+tabela(:,20)+tabela(:,21))],titulo1,xTexto1,yTexto1,legenda1,[],[],[],[],0);
+end
+legend(legenda1,1);
+xgrid(1,1,7);
+//
+//TABELAS PARA INSERIR NO RELATÓRIO
+Ci = tabela(1,:);
+Cf = tabela($,:);
+Mwjn = min(tabela,'r');
+Max = max(tabela,'r');
+Tabf = [Ci' Cf' Mwjn' Max'];
+mprintf("\n Inicial\t Final\t Mínimo\t Máximo\t \n")
+mprintf("%14.6f %14.6f %14.6f %14.6f \n", Tabf)
